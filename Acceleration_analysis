@@ -1,0 +1,55 @@
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr
+
+# File path
+file_path = r"C:\Users\lrmacha\Downloads\accel_analysis.xlsx"
+
+# Load sheets
+impact_df = pd.read_excel(file_path, sheet_name='impact')
+matrix_df = pd.read_excel(file_path, sheet_name='matrix', index_col=0)
+top_genes_df = pd.read_excel(file_path, sheet_name='Top_genes')
+
+# Clean up sample IDs
+impact_df['Post-Match RNA Sample'] = impact_df['Post-Match RNA Sample'].astype(str)
+matrix_df.columns = matrix_df.columns.astype(str)
+
+# Get acceleration data
+acceleration_series = impact_df.set_index('Post-Match RNA Sample')['Match Cummulative Linear Acceleration (g)']
+
+# Create a folder to save plots (optional)
+import os
+plot_dir = r"C:\Users\lrmacha\Downloads\gene_correlation_plots"
+os.makedirs(plot_dir, exist_ok=True)
+
+# Loop and plot
+for gene in top_genes_df.iloc[:, 0]:
+    if gene in matrix_df.index:
+        gene_tpm = matrix_df.loc[gene]
+
+        # Match sample IDs
+        common_samples = gene_tpm.index.intersection(acceleration_series.index)
+        gene_tpm_filtered = gene_tpm[common_samples]
+        accel_filtered = acceleration_series[common_samples]
+
+        if len(gene_tpm_filtered) > 1:
+            # Calculate correlation
+            r, p = spearmanr(gene_tpm_filtered.values, accel_filtered.values)
+
+            # Create a DataFrame for plotting
+            plot_df = pd.DataFrame({
+                'TPM': gene_tpm_filtered.values,
+                'Acceleration (g)': accel_filtered.values
+            })
+
+            # Plot
+            plt.figure(figsize=(6, 5))
+            sns.regplot(x='TPM', y='Acceleration (g)', data=plot_df, scatter_kws={'s': 50})
+            plt.title(f"{gene}\nSpearman r = {r:.2f}, p = {p:.3g}")
+            plt.tight_layout()
+            
+            # Save plot
+            plot_path = os.path.join(plot_dir, f"{gene}_correlation.png")
+            plt.savefig(plot_path, dpi=300)
+            plt.close()
