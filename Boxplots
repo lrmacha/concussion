@@ -1,0 +1,36 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import re
+import os
+
+file_path = r"C:\Users\lrmacha\Downloads\Filtered_UniquemiRNA.xlsx"
+df = pd.read_excel(file_path)
+
+def extract_base_group(col_name):
+    return re.sub(r'\.\d+$', '', col_name)
+
+save_dir = r"C:\Users\lrmacha\Downloads\boxplots"
+os.makedirs(save_dir, exist_ok=True)
+
+for idx, row in df.iterrows():
+    gene_id = row[df.columns[0]]
+    gene_data = row[1:]
+    
+    plot_df = pd.DataFrame({
+        'value': gene_data.values,
+        'original_group': gene_data.index
+    })
+    plot_df['base_group'] = plot_df['original_group'].apply(extract_base_group)
+    
+    plt.figure(figsize=(8,5))
+    sns.boxplot(x='base_group', y='value', data=plot_df, color='lightgray', showfliers=False)
+    sns.swarmplot(x='base_group', y='value', data=plot_df, color='black', size=5)
+    plt.title(f'Boxplot with data points for gene: {gene_id}')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    
+    safe_gene_id = re.sub(r'[\\/*?:"<>|]',"_", str(gene_id))
+    plt.savefig(os.path.join(save_dir, f"{safe_gene_id}.jpeg"))
+    plt.show()   # display the plot in the IDE's plot window
+    plt.close()  # then close it to free memory and avoid overlap
