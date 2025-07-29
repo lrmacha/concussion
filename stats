@@ -1,0 +1,53 @@
+import pandas as pd
+import scipy.stats as stats
+import re
+
+file_path = r"C:\Users\lrmacha\Downloads\Filtered_UniquemiRNA.xlsx"
+df = pd.read_excel(file_path)
+
+def extract_base_group(col_name):
+    return re.sub(r'\.\d+$', '', col_name)
+
+results = []
+
+for idx, row in df.iterrows():
+    gene_id = row[df.columns[0]]
+    gene_data = row[1:]
+    
+    # Create DataFrame for this gene
+    plot_df = pd.DataFrame({
+        'value': gene_data.values,
+        'original_group': gene_data.index
+    })
+    plot_df['base_group'] = plot_df['original_group'].apply(extract_base_group)
+    
+    # Group by base_group to get descriptive stats
+    desc_stats = plot_df.groupby('base_group')['value'].agg(['mean', 'median', 'std', 'count']).reset_index()
+    
+    # Prepare data for ANOVA: get list of values per group
+    groups = [group["value"].values for name, group in plot_df.groupby('base_group')]
+    
+    # Run ANOVA only if there are at least 2 groups with >1 observation
+    if sum([len(g) > 1 for g in groups]) >= 2:
+        f_stat, p_val = stats.f_oneway(*groups)
+    else:
+        f_stat, p_val = (None, None)
+    
+    # Flatten descriptive stats into a dict for output
+    stats_dict = {'gene': gene_id, 'anova_F': f_stat, 'anova_p': p_val}
+    for _, row_stat in desc_stats.iterrows():
+        grp = row_stat['base_group']
+        stats_dict[f'{grp}_mean'] = row_stat['mean']
+        stats_dict[f'{grp}_median'] = row_stat['median']
+        stats_dict[f'{grp}_std'] = row_stat['std']
+        stats_dict[f'{grp}_count'] = row_stat['count']
+    
+    results.append(stats_dict)
+
+# Convert results list to DataFrame
+results_df = pd.DataFrame(results)
+
+# Optional: save to Excel
+results_df.to_excel(r"C:\Users\lrmacha\Downloads\gene_descriptive_stats_anova.xlsx", index=False)
+
+print("Descriptive statistics and ANOVA table created and saved as 'gene_descriptive_stats_anova.xlsx'")
