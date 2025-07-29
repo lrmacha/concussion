@@ -1,10 +1,13 @@
 import pandas as pd
 import scipy.stats as stats
 import re
+from statsmodels.stats.multitest import multipletests
 
+# Load data
 file_path = r"C:\Users\lrmacha\Downloads\Filtered_UniquemiRNA.xlsx"
 df = pd.read_excel(file_path)
 
+# Function to extract base group (e.g., remove .1, .2)
 def extract_base_group(col_name):
     return re.sub(r'\.\d+$', '', col_name)
 
@@ -13,41 +16,73 @@ results = []
 for idx, row in df.iterrows():
     gene_id = row[df.columns[0]]
     gene_data = row[1:]
-    
+
     # Create DataFrame for this gene
     plot_df = pd.DataFrame({
         'value': gene_data.values,
         'original_group': gene_data.index
     })
     plot_df['base_group'] = plot_df['original_group'].apply(extract_base_group)
-    
+
+    # Ensure all values are numeric
+    plot_df['value'] = pd.to_numeric(plot_df['value'], errors='coerce')
+
     # Group by base_group to get descriptive stats
     desc_stats = plot_df.groupby('base_group')['value'].agg(['mean', 'median', 'std', 'count']).reset_index()
-    
-    # Prepare data for ANOVA: get list of values per group
-    groups = [group["value"].values for name, group in plot_df.groupby('base_group')]
-    
-    # Run ANOVA only if there are at least 2 groups with >1 observation
-    if sum([len(g) > 1 for g in groups]) >= 2:
+
+    # Prepare for ANOVA
+    grouped = plot_df.groupby('base_group')
+    groups = [group['value'].dropna().values for _, group in grouped]
+
+    # Only run ANOVA if ≥2 groups with >1 observation
+    if sum(len(g) > 1 for g in groups) >= 2:
         f_stat, p_val = stats.f_oneway(*groups)
     else:
         f_stat, p_val = (None, None)
-    
-    # Flatten descriptive stats into a dict for output
+
+    # Start result row
     stats_dict = {'gene': gene_id, 'anova_F': f_stat, 'anova_p': p_val}
+
+    # Add descriptive stats
     for _, row_stat in desc_stats.iterrows():
         grp = row_stat['base_group']
         stats_dict[f'{grp}_mean'] = row_stat['mean']
         stats_dict[f'{grp}_median'] = row_stat['median']
         stats_dict[f'{grp}_std'] = row_stat['std']
         stats_dict[f'{grp}_count'] = row_stat['count']
-    
+
+    # Post-hoc: compare D Post Match vs others (if ANOVA is significant and D exists)
+    target_group = "D Post-Match"
+    if p_val is not None and p_val < 0.05 and target_group in grouped.groups:
+        try:
+            target_values = pd.to_numeric(grouped.get_group(target_group)['value'], errors='coerce').dropna().values
+            p_values = []
+            comparisons = []
+
+            for name, group in grouped:
+                if name == target_group:
+                    continue
+                comp_values = pd.to_numeric(group['value'], errors='coerce').dropna().values
+                if len(target_values) > 1 and len(comp_values) > 1:
+                    t_stat, p = stats.ttest_ind(target_values, comp_values, equal_var=False)
+                    p_values.append(p)
+                    comparisons.append(name)
+
+            # Apply Bonferroni correction
+            if p_values:
+                reject, pvals_corrected, _, _ = multipletests(p_values, method='bonferroni')
+                for i, comp_group in enumerate(comparisons):
+                    stats_dict[f'D_vs_{comp_group}_p_raw'] = p_values[i]
+                    stats_dict[f'D_vs_{comp_group}_p_adj'] = pvals_corrected[i]
+                    stats_dict[f'D_vs_{comp_group}_significant'] = reject[i]
+        except Exception as e:
+            print(f"Post-hoc failed for gene {gene_id}: {e}")
+
     results.append(stats_dict)
 
-# Convert results list to DataFrame
+# Convert to DataFrame and save
 results_df = pd.DataFrame(results)
+results_df.to_excel(r"C:\Users\lrmacha\Downloads\gene_stats_anova_posthoc_DvsOthers.xlsx", index=False)
 
-# Optional: save to Excel
-results_df.to_excel(r"C:\Users\lrmacha\Downloads\gene_descriptive_stats_anova.xlsx", index=False)
+print("✓ Descriptive stats + ANOVA + post-hoc (D vs others) saved to 'gene_stats_anova_posthoc_DvsOthers.xlsx'")
 
-print("Descriptive statistics and ANOVA table created and saved as 'gene_descriptive_stats_anova.xlsx'")
