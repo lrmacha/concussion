@@ -2,42 +2,45 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from scipy.stats import spearmanr
+import os
 
-# File path
+# Load Excel file
 file_path = r"C:\Users\lrmacha\Downloads\accel_analysis.xlsx"
 
-# Load sheets
+# Read sheets
 impact_df = pd.read_excel(file_path, sheet_name='impact')
 matrix_df = pd.read_excel(file_path, sheet_name='matrix', index_col=0)
 top_genes_df = pd.read_excel(file_path, sheet_name='Top_genes')
 
-# Clean up sample IDs
-impact_df['Post-Match RNA Sample'] = impact_df['Post-Match RNA Sample'].astype(str)
+# Clean IDs
+impact_df['Pre-NC Training RNA sample Group A'] = impact_df['Pre-NC Training RNA sample Group A'].astype(str)
 matrix_df.columns = matrix_df.columns.astype(str)
 
-# Get acceleration data
-acceleration_series = impact_df.set_index('Post-Match RNA Sample')['Match Cummulative Linear Acceleration (g)']
+# Get acceleration values
+acceleration_series = impact_df.set_index('Pre-NC Training RNA sample Group A')['Training Cummulative Linear Acceleration (g)']
 
-# Create a folder to save plots (optional)
-import os
+# Create folder for plots
 plot_dir = r"C:\Users\lrmacha\Downloads\gene_correlation_plots"
 os.makedirs(plot_dir, exist_ok=True)
 
-# Loop and plot
+# Prepare results list
+results = []
+
+# Loop through top genes
 for gene in top_genes_df.iloc[:, 0]:
     if gene in matrix_df.index:
         gene_tpm = matrix_df.loc[gene]
-
-        # Match sample IDs
         common_samples = gene_tpm.index.intersection(acceleration_series.index)
+
         gene_tpm_filtered = gene_tpm[common_samples]
         accel_filtered = acceleration_series[common_samples]
 
         if len(gene_tpm_filtered) > 1:
-            # Calculate correlation
+            # Compute correlation
             r, p = spearmanr(gene_tpm_filtered.values, accel_filtered.values)
+            results.append({'Gene': gene, 'Spearman_r': r, 'p_value': p})
 
-            # Create a DataFrame for plotting
+            # Create plot DataFrame
             plot_df = pd.DataFrame({
                 'TPM': gene_tpm_filtered.values,
                 'Acceleration (g)': accel_filtered.values
@@ -48,8 +51,22 @@ for gene in top_genes_df.iloc[:, 0]:
             sns.regplot(x='TPM', y='Acceleration (g)', data=plot_df, scatter_kws={'s': 50})
             plt.title(f"{gene}\nSpearman r = {r:.2f}, p = {p:.3g}")
             plt.tight_layout()
-            
+
             # Save plot
             plot_path = os.path.join(plot_dir, f"{gene}_correlation.png")
             plt.savefig(plot_path, dpi=300)
             plt.close()
+        else:
+            results.append({'Gene': gene, 'Spearman_r': None, 'p_value': None})
+    else:
+        results.append({'Gene': gene, 'Spearman_r': None, 'p_value': None})
+
+# Convert results to DataFrame
+results_df = pd.DataFrame(results)
+
+# Save results to Excel
+results_excel_path = r"C:\Users\lrmacha\Downloads\gene_correlation_plots\gene_accel_correlation_results.xlsx"
+results_df.to_excel(results_excel_path, index=False)
+
+print(f"\n✅ Correlation results saved to: {results_excel_path}")
+print(f"✅ Plots saved in: {plot_dir}")
