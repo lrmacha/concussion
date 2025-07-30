@@ -1,0 +1,120 @@
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy.stats import spearmanr, pearsonr, shapiro
+import numpy as np
+import os
+
+# Load Excel file
+file_path = r"C:\Users\lrmacha\Downloads\accel_analysis.xlsx"
+
+# Read sheets
+impact_df = pd.read_excel(file_path, sheet_name='impact')
+matrix_df = pd.read_excel(file_path, sheet_name='matrix', index_col=0)
+top_genes_df = pd.read_excel(file_path, sheet_name='Top_genes')
+
+# Clean IDs
+impact_df['Post-Match RNA Sample'] = impact_df['Post-Match RNA Sample'].astype(str)
+matrix_df.columns = matrix_df.columns.astype(str)
+
+# Standardize gene names to uppercase for case-insensitive matching
+matrix_df.index = matrix_df.index.str.upper()
+top_genes = top_genes_df.iloc[:, 0].astype(str).str.upper()
+
+# Get acceleration values
+acceleration_series = impact_df.set_index('Post-Match RNA Sample')['Match Cummulative Linear Acceleration (g)']
+
+# Create folder for plots
+plot_dir = r"C:\Users\lrmacha\Downloads\gene_correlation_plots"
+os.makedirs(plot_dir, exist_ok=True)
+
+# Prepare results list
+results = []
+
+# Loop through top genes
+for gene in top_genes:
+    if gene in matrix_df.index:
+        gene_tpm = matrix_df.loc[gene]
+        common_samples = gene_tpm.index.intersection(acceleration_series.index)
+
+        gene_tpm_filtered = gene_tpm[common_samples]
+        accel_filtered = acceleration_series[common_samples]
+
+        if len(gene_tpm_filtered) > 2:  # Shapiro needs at least 3 points
+            # Apply log2(TPM + 1)
+            log_tpm = np.log2(gene_tpm_filtered + 1)
+
+            # Check normality
+            try:
+                stat1, p_norm_tpm = shapiro(log_tpm.values)
+                normal_tpm = p_norm_tpm > 0.05
+            except:
+                normal_tpm = False
+
+            try:
+                stat2, p_norm_accel = shapiro(accel_filtered.values)
+                normal_accel = p_norm_accel > 0.05
+            except:
+                normal_accel = False
+
+            # Choose method
+            if normal_tpm and normal_accel:
+                method = 'Pearson'
+                r, p_corr = pearsonr(log_tpm.values, accel_filtered.values)
+            else:
+                method = 'Spearman'
+                r, p_corr = spearmanr(log_tpm.values, accel_filtered.values)
+
+            results.append({
+                'Gene': gene,
+                'Method': method,
+                'r': r,
+                'p_value': p_corr,
+                'TPM_normal': normal_tpm,
+                'Accel_normal': normal_accel
+            })
+
+            # Create plot DataFrame
+            plot_df = pd.DataFrame({
+                'log2(TPM+1)': log_tpm.values,
+                'Acceleration (g)': accel_filtered.values
+            })
+
+            # Plot
+            plt.figure(figsize=(6, 5))
+            sns.regplot(x='log2(TPM+1)', y='Acceleration (g)', data=plot_df, scatter_kws={'s': 50})
+            plt.title(f"{gene} ({method})\nr = {r:.2f}, p = {p_corr:.3g}")
+            plt.tight_layout()
+
+            # Save plot
+            plot_path = os.path.join(plot_dir, f"{gene}_correlation.png")
+            plt.savefig(plot_path, dpi=300)
+            plt.close()
+        else:
+            results.append({
+                'Gene': gene,
+                'Method': None,
+                'r': None,
+                'p_value': None,
+                'TPM_normal': None,
+                'Accel_normal': None
+            })
+    else:
+        results.append({
+            'Gene': gene,
+            'Method': None,
+            'r': None,
+            'p_value': None,
+            'TPM_normal': None,
+            'Accel_normal': None
+        })
+
+# Convert results to DataFrame
+results_df = pd.DataFrame(results)
+
+# Save results to Excel
+results_excel_path = os.path.join(plot_dir, "gene_accel_correlation_results.xlsx")
+results_df.to_excel(results_excel_path, index=False)
+
+print(f"\n✅ Correlation results saved to: {results_excel_path}")
+print(f"✅ Plots saved in: {plot_dir}")
