@@ -1,0 +1,67 @@
+import pandas as pd
+import numpy as np
+from scipy.stats import pearsonr
+
+# ---- File paths ----
+transformed_file = r"C:\Users\lrmacha\Downloads\transformed_data.csv"
+original_file = r"C:\Users\lrmacha\Downloads\original_data.csv"
+
+# ---- Load CSVs ----
+df_transformed = pd.read_csv(transformed_file, index_col=0)
+df_original = pd.read_csv(original_file, index_col=0)
+
+# ---- Drop replicate columns (columns 2 & 3 are index 1 and 2) ----
+df_transformed = df_transformed.drop(df_transformed.columns[[1, 2]], axis=1)
+
+# ---- Harmonize gene names (case-insensitive) ----
+df_transformed.index = df_transformed.index.str.upper()
+df_original.index = df_original.index.str.upper()
+
+# ---- Align on common genes ----
+common_genes = df_transformed.index.intersection(df_original.index)
+df_transformed = df_transformed.loc[common_genes]
+df_original = df_original.loc[common_genes]
+
+# ---- Convert raw counts to log2 CPM ----
+def log2_cpm(counts, prior_count=1):
+    lib_sizes = counts.sum(axis=0)
+    cpm = counts.divide(lib_sizes) * 1e6
+    return np.log2(cpm + prior_count)
+
+df_original_logcpm = log2_cpm(df_original)
+
+# ---- Ensure numeric values ----
+df_transformed = df_transformed.apply(pd.to_numeric, errors='coerce')
+df_original_logcpm = df_original_logcpm.apply(pd.to_numeric, errors='coerce')
+
+# ---- Match transformed to original samples ----
+mapping = {}
+correlation_matrix = pd.DataFrame(index=df_transformed.columns, columns=df_original_logcpm.columns)
+
+for t_col in df_transformed.columns:
+    best_corr = -2
+    best_match = None
+    for o_col in df_original_logcpm.columns:
+        x = df_transformed[t_col]
+        y = df_original_logcpm[o_col]
+        valid = x.notna() & y.notna()
+        if valid.sum() < 10:
+            continue
+        r, _ = pearsonr(x[valid], y[valid])
+        correlation_matrix.loc[t_col, o_col] = r
+        if r > best_corr:
+            best_corr = r
+            best_match = o_col
+    mapping[t_col] = best_match
+
+# ---- Save results ----
+mapping_df = pd.DataFrame.from_dict(mapping, orient='index', columns=["Original_ID"])
+mapping_df.index.name = "Transformed_ID"
+mapping_df.reset_index(inplace=True)
+
+mapping_df.to_csv(r"C:\Users\lrmacha\Downloads\matched_sample_ids.csv", index=False)
+correlation_matrix.to_csv(r"C:\Users\lrmacha\Downloads\correlation_matrix.csv")
+
+print("✅ Matching complete. Files saved:")
+print("→ matched_sample_ids.csv")
+print("→ correlation_matrix.csv")
